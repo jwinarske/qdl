@@ -486,6 +486,11 @@ int firehose_apply_ufs_common(struct qdl_device *ctx, struct ufs_common *ufs) {
     xml_set_property_format(node_to_send, "bConfigDescrLock", "%d",
                             0/*ufs->bConfigDescrLock*/); //Safety, remove before fly
 
+    xml_set_property_format(node_to_send, "bWriteBoosterBufferPreserveUserSpaceEn", "%d",
+                            ufs->bWriteBoosterBufferPreserveUserSpaceEn);
+    xml_set_property_format(node_to_send, "bWriteBoosterBufferType", "%d", ufs->bWriteBoosterBufferType);
+    xml_set_property_format(node_to_send, "shared_wb_buffer_size_in_qb", "%d", ufs->shared_wb_buffer_size_in_kb);
+
     ret = firehose_send_single_tag(ctx, node_to_send);
     if (ret)
         fprintf(stderr, "[APPLY UFS common] %d\n", ret);
