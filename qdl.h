@@ -18,6 +18,8 @@ struct qdl_device {
     __attribute__((unused)) size_t in_max_pkt_size;
     size_t out_max_pkt_size;
 
+    size_t multiplier;
+
     char *mappings[MAPPING_SZ]; // array index is the id from the device
 };
 

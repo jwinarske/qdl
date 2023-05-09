@@ -333,7 +333,7 @@ int qdl_write(struct qdl_device *ctx, const void *buf, size_t len) {
 
     while (len > 0) {
         size_t xfer;
-        xfer = (len > ctx->out_max_pkt_size) ? ctx->out_max_pkt_size : len;
+        xfer = (len > ctx->out_max_pkt_size * ctx->multiplier) ? ctx->out_max_pkt_size * ctx->multiplier : len;
 
         bulk.ep = ctx->out_ep;
         bulk.len = xfer;
@@ -344,6 +344,9 @@ int qdl_write(struct qdl_device *ctx, const void *buf, size_t len) {
         if (n != xfer) {
             fprintf(stderr, "ERROR: n = %d, errno = %d (%s)\n",
                     n, errno, strerror(errno));
+            if (errno == ENOMEM && ctx->multiplier != 1) {
+                fprintf(stderr, "Buffer multiplier set to %lu. Try using smaller multiplier!\n", ctx->multiplier);
+            }
             return -1;
         }
         count += (int) xfer;
@@ -367,7 +370,7 @@ int qdl_write(struct qdl_device *ctx, const void *buf, size_t len) {
 
 static void print_usage(const char *progname) {
     fprintf(stderr,
-            "%s [--debug] [--storage <emmc|nand|ufs>] [--finalize-provisioning] [--include <PATH>] <prog.mbn> [<program> <patch> ...]\n",
+            "%s [--debug] [--multiplier 1-2048] [--storage <emmc|nand|ufs>] [--finalize-provisioning] [--include <PATH>] <prog.mbn> [<program> <patch> ...]\n",
             progname);
 }
 
@@ -378,6 +381,7 @@ int main(int argc, char **argv) {
     int ret;
     int opt;
     bool qdl_finalize_provisioning = false;
+    qdl.multiplier = 128;
 
 
     static struct option options[] = {
@@ -385,6 +389,7 @@ int main(int argc, char **argv) {
             {"include",               required_argument, 0, 'i'},
             {"finalize-provisioning", no_argument,       0, 'l'},
             {"storage",               required_argument, 0, 's'},
+            {"multiplier",            required_argument, 0, 'm'},
             {0, 0,                                       0, 0}
     };
 
@@ -402,6 +407,11 @@ int main(int argc, char **argv) {
             case 's':
                 storage = optarg;
                 break;
+            case 'm':
+                qdl.multiplier = strtol(optarg, NULL, 10);
+                if (qdl.multiplier >= 1 && qdl.multiplier <= 2048) {
+                    continue;
+                }
             default:
                 print_usage(NULL);
                 return 1;
