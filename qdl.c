@@ -382,6 +382,8 @@ int main(int argc, char **argv) {
     int opt;
     bool qdl_finalize_provisioning = false;
     qdl.multiplier = 128;
+    qdl.pk_hash_len = 0;
+    qdl.msm_id_len = 0;
 
 
     static struct option options[] = {
@@ -413,7 +415,7 @@ int main(int argc, char **argv) {
                     continue;
                 }
             default:
-                print_usage(NULL);
+                print_usage(argv[0]);
                 return 1;
         }
     }
@@ -464,6 +466,13 @@ int main(int argc, char **argv) {
     ret = firehose_run(&qdl, incdir, storage);
     if (ret < 0)
         return 1;
+
+    if (qdl.msm_id_len) {
+        free(qdl.msm_id);
+    }
+    if (qdl.pk_hash_len) {
+        free(qdl.pk_hash);
+    }
 
     return 0;
 }

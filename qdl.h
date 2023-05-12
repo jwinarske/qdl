@@ -2,6 +2,7 @@
 #define QDL_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #include "patch.h"
 #include "program.h"
@@ -21,6 +22,12 @@ struct qdl_device {
     size_t multiplier;
 
     char *mappings[MAPPING_SZ]; // array index is the id from the device
+
+    uint32_t serial;
+    uint32_t msm_id_len;
+    uint8_t *msm_id;
+    uint32_t pk_hash_len;
+    uint8_t *pk_hash;
 };
 
 int qdl_read(struct qdl_device *ctx, void *buf, size_t len, unsigned int timeout);

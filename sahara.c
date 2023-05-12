@@ -76,19 +76,27 @@ struct sahara_pkt {
             uint64_t offset;
             uint64_t length;
         } read64_req;
+        struct {
+            uint32_t cmd;
+        } cmd_req;
+        struct {
+            uint32_t cmd;
+            uint32_t data_len;
+        } cmd_resp;
     };
 };
 
 static void sahara_send_reset(struct qdl_device *ctx) {
     struct sahara_pkt resp;
 
+    memset(&resp, 0, sizeof(struct sahara_pkt));
     resp.cmd = 7;
     resp.length = 8;
 
     qdl_write(ctx, &resp, resp.length);
 }
 
-static void sahara_hello(struct qdl_device *ctx, struct sahara_pkt *pkt) {
+static void sahara_hello(struct qdl_device *ctx, struct sahara_pkt *pkt, uint32_t mode) {
     struct sahara_pkt resp;
 
     assert(pkt->length == 0x30);
@@ -96,12 +104,12 @@ static void sahara_hello(struct qdl_device *ctx, struct sahara_pkt *pkt) {
     printf("HELLO version: 0x%x compatible: 0x%x max_len: %d mode: %d\n",
            pkt->hello_req.version, pkt->hello_req.compatible, pkt->hello_req.max_len, pkt->hello_req.mode);
 
+    memset(&resp, 0, sizeof(struct sahara_pkt));
     resp.cmd = 2;
     resp.length = 0x30;
     resp.hello_resp.version = 2;
     resp.hello_resp.compatible = 1;
-    resp.hello_resp.status = 0;
-    resp.hello_resp.mode = pkt->hello_req.mode;
+    resp.hello_resp.mode = mode;
 
     qdl_write(ctx, &resp, resp.length);
 }
@@ -223,6 +231,70 @@ static void sahara_eoi(struct qdl_device *ctx, struct sahara_pkt *pkt) {
     qdl_write(ctx, &done, done.length);
 }
 
+static void sahara_exe_cmd(struct qdl_device *ctx, struct sahara_pkt *pkt, uint32_t cmd) {
+    struct sahara_pkt resp;
+    uint8_t buf[256];
+    int n;
+    uint32_t len;
+
+    memset(&resp, 0, sizeof(struct sahara_pkt));
+    resp.cmd = 0xd;
+    resp.length = 12;
+    resp.cmd_req.cmd = cmd;
+    qdl_write(ctx, &resp, resp.length);
+
+    n = qdl_read(ctx, pkt, sizeof(struct sahara_pkt), 1000);
+    if (n < 0) {
+        printf("read failed\n");
+        return;
+    }
+
+    len = pkt->cmd_resp.data_len;
+    printf("exe cmd %d Response: data_len=%d\n", pkt->cmd_resp.cmd, len);
+
+    memset(&resp, 0, sizeof(struct sahara_pkt));
+    resp.cmd = 0xf;
+    resp.length = 12;
+    resp.cmd_req.cmd = pkt->cmd_resp.cmd;
+    qdl_write(ctx, &resp, resp.length);
+
+    n = qdl_read(ctx, buf, len, 1000);
+    if (n < 0) {
+        printf("sahara_exe_cmd: read failed\n");
+        return;
+    }
+    assert(n == len);
+
+    switch (resp.cmd_req.cmd) {
+        case 0x01:
+            ctx->serial = buf[3] << 24 | buf[2] << 16 | buf[1] << 8 | buf[0];
+            printf("serial: 0x%08X\n", ctx->serial);
+            break;
+        case 0x02:
+            ctx->msm_id_len = len;
+            ctx->msm_id = malloc(len);
+            memcpy(ctx->msm_id, buf, len);
+            print_hex_dump("msm-id", ctx->msm_id, len);
+            break;
+        case 0x03:
+            ctx->pk_hash_len = len;
+            ctx->pk_hash = malloc(len);
+            memcpy(ctx->pk_hash, buf, len);
+            print_hex_dump("pk_hash", ctx->pk_hash, len);
+            break;
+    }
+}
+
+static void sahara_switch_mode(struct qdl_device *ctx, uint32_t mode) {
+    struct sahara_pkt resp;
+
+    memset(&resp, 0, sizeof(struct sahara_pkt));
+    resp.cmd = 0xc;
+    resp.length = 12;
+    resp.cmd_req.cmd = mode;
+    qdl_write(ctx, &resp, resp.length);
+}
+
 static int sahara_done(struct qdl_device *ctx, struct sahara_pkt *pkt) {
     (void) ctx;
     assert(pkt->length == 0xc);
@@ -239,6 +311,7 @@ int sahara_run(struct qdl_device *ctx, char *img_arr[], bool single_image) {
     char buf[4096];
     char tmp[32];
     bool done = false;
+    bool cmd_mode = true;
     int n;
 
     while (!done) {
@@ -249,12 +322,14 @@ int sahara_run(struct qdl_device *ctx, char *img_arr[], bool single_image) {
         pkt = (struct sahara_pkt *) buf;
         if (n != pkt->length) {
             fprintf(stderr, "length not matching\n");
+            print_hex_dump("cmd_response", buf, n);
             return -EINVAL;
         }
 
         switch (pkt->cmd) {
             case 1:
-                sahara_hello(ctx, pkt);
+                if (cmd_mode) sahara_hello(ctx, pkt, 3);
+                else sahara_hello(ctx, pkt, 0);
                 break;
             case 3:
                 sahara_read(ctx, pkt, img_arr, single_image);
@@ -268,6 +343,15 @@ int sahara_run(struct qdl_device *ctx, char *img_arr[], bool single_image) {
                 /* E.g MSM8916 EDL reports done = 0 here */
                 if (single_image)
                     done = true;
+                break;
+            case 0xb:
+                if (cmd_mode) {
+                    sahara_exe_cmd(ctx, pkt, 1);
+                    sahara_exe_cmd(ctx, pkt, 2);
+                    sahara_exe_cmd(ctx, pkt, 3);
+                    sahara_switch_mode(ctx, 0);
+                    cmd_mode = false;
+                }
                 break;
             case 0x12:
                 sahara_read64(ctx, pkt, img_arr, single_image);
